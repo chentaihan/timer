@@ -3,10 +3,10 @@
 # 定时器管理器
 
 ## 实现原理
-1：按照时间排序维护一个最小堆，堆顶元素就是最近要执行的任务
-2：每100毫秒检查一次，是否有到期的任务，启动子协程执行所有到期的任务
-3：维护一个任务id和任务对应关系的map，可通过任务id删除任务
-4：开始执行一个任务时，会将多次执行的任务添加到堆中，每次都会更新任务的执行时间，等待下次执行，如果是只执行一次的任务，不再加入堆并移除任务
+* 1：按照时间排序维护一个最小堆，堆顶元素就是最近要执行的任务
+* 2：每100毫秒检查一次，是否有到期的任务，启动子协程执行所有到期的任务
+* 3：维护一个任务id和任务对应关系的map，可通过任务id删除任务
+* 4：开始执行一个任务时，会将多次执行的任务更新任务的执行时间，出堆之后再次添加到堆中，等待下次执行，如果是只执行一次的任务，出堆之后不再添加到堆中
 
 ## 定时器接口说明
 ```
@@ -43,19 +43,19 @@ type ITimer interface {
 
 ## 实例
 ```
-	tm := NewTimer()
-	go tm.Start()
-	for i := 0; i < 100; i++ {
-		timerId := tm.Add(func() {
-			fmt.Println(i)
-		}, time.Second, false)
-		fmt.Println("timerId=", timerId)
-	}
-	time.Sleep(time.Second * 3)
-	fmt.Println("finishCount: ", tm.GetFinishCount())
-	fmt.Println("runningCount: ", tm.GetRunningCount())
-	fmt.Println("taskCount: ", tm.GetTaskCount())
-	tm.Remove(10)
-	tm.Stop()
-	fmt.Println("taskCount: ", tm.GetTaskCount())
+tm := NewTimer()
+go tm.Start()
+for i := 0; i < 100; i++ {
+    timerId := tm.Add(func() {
+        fmt.Println(i)
+    }, time.Second, false)
+    fmt.Println("timerId=", timerId)
+}
+time.Sleep(time.Second * 3)
+fmt.Println("finishCount: ", tm.GetFinishCount())
+fmt.Println("runningCount: ", tm.GetRunningCount())
+fmt.Println("taskCount: ", tm.GetTaskCount())
+tm.Remove(10)
+tm.Stop()
+fmt.Println("taskCount: ", tm.GetTaskCount())
 ```
