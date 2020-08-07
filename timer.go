@@ -2,24 +2,20 @@ package timer
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type Cmd int
+type CmdType int
 
 const (
-	CmdAdd    Cmd = 1
-	CmdRemove Cmd = 2
-	CmdClose  Cmd = 3
+	CmdAdd    CmdType = 1
+	CmdRemove CmdType = 2
+	CmdClose  CmdType = 3
 )
 
 type RunFun func()
-
-type ITimer interface {
-	Add(fun RunFun, interval time.Duration, once bool) int64
-	Remove(timerId int64)
-}
 
 type task struct {
 	id       int64
@@ -37,17 +33,17 @@ func (tk *task) GetValue() int {
 	return int(tk.id)
 }
 
-type taskCmd struct {
-	cmd      Cmd
+type Cmd struct {
+	cmd      CmdType
 	data     interface{}
-	response chan *taskCmd
+	response chan *Cmd
 }
 
-func newTaskCmd(cmd Cmd, data interface{}) *taskCmd {
-	return &taskCmd{
+func newTaskCmd(cmd CmdType, data interface{}) *Cmd {
+	return &Cmd{
 		cmd:      cmd,
 		data:     data,
-		response: make(chan *taskCmd),
+		response: make(chan *Cmd),
 	}
 }
 
@@ -56,18 +52,19 @@ type Timer struct {
 	mTask        map[int64]*task
 	heap         *SmallHeap
 	status       int64
-	chTask       chan *taskCmd
+	chCmd        chan *Cmd
 	finishCount  int64 //执行完成数量
 	runningCount int64 //正在执行的方法数量
+	wg           sync.WaitGroup
 }
 
-func NewTimer() *Timer {
+func NewTimer() ITimer {
 	return &Timer{
 		Id:     0,
 		mTask:  make(map[int64]*task),
 		heap:   NewSmallHeap(4),
 		status: 0,
-		chTask: make(chan *taskCmd),
+		chCmd:  make(chan *Cmd),
 	}
 }
 
@@ -76,6 +73,9 @@ func (t *Timer) nextId() uint64 {
 }
 
 func (t *Timer) Add(fun RunFun, interval time.Duration, once bool) int64 {
+	if interval < 0 {
+		interval = 0
+	}
 	tk := &task{
 		id:       int64(t.nextId()),
 		fun:      fun,
@@ -83,7 +83,7 @@ func (t *Timer) Add(fun RunFun, interval time.Duration, once bool) int64 {
 		once:     once,
 	}
 	cmd := newTaskCmd(CmdAdd, tk)
-	t.chTask <- cmd
+	t.chCmd <- cmd
 	<-cmd.response
 	return tk.id
 }
@@ -93,7 +93,7 @@ func (t *Timer) Remove(timerId int64) {
 		return
 	}
 	cmd := newTaskCmd(CmdRemove, timerId)
-	t.chTask <- cmd
+	t.chCmd <- cmd
 	<-cmd.response
 }
 
@@ -110,7 +110,7 @@ func (t *Timer) Start() {
 		select {
 		case <-ticker.C:
 			t.checkAndRunTask()
-		case task := <-t.chTask:
+		case task := <-t.chCmd:
 			switch task.cmd {
 			case CmdAdd:
 				t.addTask(task)
@@ -126,22 +126,25 @@ func (t *Timer) Start() {
 }
 
 func (t *Timer) Stop() {
+	fmt.Println("Timer.Stop in")
 	if atomic.LoadInt64(&t.status) == 0 {
 		return
 	}
 	atomic.StoreInt64(&t.status, 0)
 	cmd := newTaskCmd(CmdClose, nil)
-	t.chTask <- cmd
+	t.chCmd <- cmd
 	<-cmd.response
+	t.wg.Wait()
+	fmt.Println("Timer.Stop out")
 }
 
-func (t *Timer) close(taskCmd *taskCmd) {
+func (t *Timer) close(taskCmd *Cmd) {
 	t.mTask = make(map[int64]*task)
 	t.heap = NewSmallHeap(0)
 	taskCmd.response <- taskCmd
 }
 
-func (t *Timer) addTask(taskCmd *taskCmd) {
+func (t *Timer) addTask(taskCmd *Cmd) {
 	task, _ := taskCmd.data.(*task)
 	task.runTime = time.Now()
 	t.mTask[task.id] = task
@@ -149,7 +152,7 @@ func (t *Timer) addTask(taskCmd *taskCmd) {
 	taskCmd.response <- taskCmd
 }
 
-func (t *Timer) removeTask(taskCmd *taskCmd) {
+func (t *Timer) removeTask(taskCmd *Cmd) {
 	taskId, _ := taskCmd.data.(int64)
 	if task := t.mTask[taskId]; task != nil {
 		t.heap.Remove(task)
@@ -177,10 +180,12 @@ func (t *Timer) checkAndRunTask() {
 
 func (t *Timer) run(task *task) {
 	go func() {
+		t.wg.Add(1)
 		atomic.AddInt64(&t.runningCount, 1)
 		defer func() {
 			atomic.AddInt64(&t.finishCount, 1)
 			atomic.AddInt64(&t.runningCount, -1)
+			t.wg.Done()
 		}()
 		task.fun()
 	}()

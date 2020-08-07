@@ -20,5 +20,6 @@ func TestNewTimer(t *testing.T) {
 	fmt.Println("runningCount: ", tm.GetRunningCount())
 	fmt.Println("taskCount: ", tm.GetTaskCount())
 	tm.Remove(10)
+	tm.Stop()
 	fmt.Println("taskCount: ", tm.GetTaskCount())
 }
